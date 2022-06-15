@@ -22,5 +22,15 @@
     <Inf Include="SSDTHook.inf">
       <Filter>Driver Files</Filter>
     </Inf>
-  </ItemGroup>  
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Header.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>
