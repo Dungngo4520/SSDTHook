@@ -72,6 +72,8 @@ artifacts/
 *.recipe
 *.tlog
 *.filters
+*.iobj
+*.ipdb
 
 # Chutzpah Test files
 _Chutzpah*

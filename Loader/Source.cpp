@@ -1,45 +1,75 @@
+
 #include <stdio.h>
 #include <Windows.h>
+
+using namespace std;
 
 int main() {
 	SC_HANDLE hSCManager, hService;
 	SERVICE_STATUS ss;
+	PWCHAR currentDir = NULL;
+
+	printf("Loading Driver\n");
+
+
 
 	hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
+	currentDir = (PWCHAR)calloc(BUFSIZ, sizeof(WCHAR));
 
-	printf("Load Driver\n");
+	if (hSCManager && currentDir) {
+		printf("Creating Service\n");
 
-	if (hSCManager) {
-		printf("Create Service\n");
+		GetCurrentDirectoryW(BUFSIZ, currentDir);
 
-		hService = CreateService(hSCManager,
+		printf("Current Dir: %ls\n", currentDir);
+
+		wcscat_s(currentDir,BUFSIZ, L"\\SSDTHook.sys");
+
+		hService = CreateServiceW(
+			hSCManager,
 			L"SSDTHook",
 			L"SSDTHook Driver",
 			SERVICE_ALL_ACCESS,
 			SERVICE_KERNEL_DRIVER,
 			SERVICE_DEMAND_START,
 			SERVICE_ERROR_IGNORE,
-			L"SSDTHook.sys",
+			currentDir,
 			NULL, NULL, NULL, NULL, NULL);
 
-		if (!hService) {
-			hService = OpenService(hSCManager, L"SSDTHook", SERVICE_START);
+
+
+		if (hService == NULL && GetLastError() == ERROR_SERVICE_EXISTS) {
+			printf("Service Existed. Attempting to open...\n");
+
+			hService = OpenServiceW(hSCManager, L"SSDTHook", SERVICE_ALL_ACCESS);
 		}
 
 		if (hService) {
 			printf("Start Service\n");
+			if (!StartService(hService, 0, NULL)) {
+				printf("Failed to start service. %d\n", GetLastError());
+			}
 
-			StartService(hService, 0, NULL);
-			printf("Press Enter to close service\r\n");
-			getchar();
-			ControlService(hService, SERVICE_CONTROL_STOP, &ss);
+			printf("ZwQueryDirectoryFile Hooked.\n");
+			system("pause");
+
+			if (!ControlService(hService, SERVICE_CONTROL_STOP, &ss)) {
+				printf("Failed to control service. %d\n", GetLastError());
+			}
+			if (!DeleteService(hService)) {
+				printf("Failed to delete service. %d\n", GetLastError());
+			}
 
 			CloseServiceHandle(hService);
-
-			DeleteService(hService);
+		}
+		else {
+			printf("Failed to get service handle. %d\n", GetLastError());
 		}
 
 		CloseServiceHandle(hSCManager);
+	}
+	else {
+		printf("Failed to get service manager handle. %d\n", GetLastError());
 	}
 
 	return 0;
